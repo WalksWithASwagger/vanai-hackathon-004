@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Data → Music Translator · The Soundtrack of Us</title>
+  <!-- Tone.js & PapaParse from CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.min.js" integrity="sha512-eJrL7+1A8bRcj5nH4qzYpE2GEX7v8C9rhp6kQwVqWz0Y0y2h0X0ZyQX7WqQv8v8Y0i0g0v8e1c8u6N1c1bT8iA==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js" integrity="sha512-vQK8Qy1mXcSx7Q1m5s3kCq2XyQ1vYF6tM6g0qKQ2u5A0v8Jt9v4o7+QmX7Z5t7WJv8wqQmJ7q0nJQGv2l6m8w==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <style>
+    :root{--bg:#0b0c10;--card:#111218;--fg:#e9eef5;--muted:#a8b0be;--accent:#79ffe1;--line:#1d2230}
+    *{box-sizing:border-box}
+    body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Inter,Helvetica,Arial;color:var(--fg);background:linear-gradient(180deg,#0b0c10,#0f1220 40%,#0b0c10)}
+    header{padding:24px 20px 8px;max-width:1100px;margin:auto}
+    h1{margin:0 0 6px;font-size:28px;letter-spacing:.2px}
+    p.sub{margin:0;color:var(--muted)}
+    main{max-width:1100px;margin:20px auto;padding:0 20px 40px;display:grid;grid-template-columns:1fr 320px;gap:16px}
+    .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px}
+    .controls label{display:block;font-size:12px;color:var(--muted);margin-top:10px}
+    .controls select,.controls input[type="text"],.controls input[type="number"],.controls input[type="file"]{width:100%;background:#0c0f18;border:1px solid #22283a;color:var(--fg);border-radius:10px;padding:9px 10px;margin-top:6px}
+    .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    .btns{display:flex;gap:10px;margin-top:14px}
+    button{flex:1;background:#161b28;border:1px solid #262d42;border-radius:12px;padding:10px 12px;color:var(--fg);cursor:pointer}
+    button.primary{background:linear-gradient(180deg,#1e263a,#151b2b);border-color:#2b3550}
+    button:disabled{opacity:.5;cursor:not-allowed}
+    .pill{display:inline-flex;align-items:center;gap:6px;background:#0e1422;border:1px solid #1f2741;border-radius:999px;padding:6px 10px;margin:4px 6px 0 0;font-size:12px;color:var(--muted)}
+    .log{font-family:ui-monospace,SFMono-Regular,Consolas,Monaco;white-space:pre-wrap;color:#c8d1e1;max-height:220px;overflow:auto}
+    .footer{color:var(--muted);font-size:12px;margin-top:8px}
+    .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Data → Music Translator</h1>
+    <p class="sub">Turn survey rows into notes, attitudes into modulations, and demographics into tempo & space. Upload your CSV, map columns, press Play.</p>
+  </header>
+
+  <main>
+    <section class="card">
+      <div class="controls">
+        <label>CSV File
+          <input id="file" type="file" accept=".csv" />
+        </label>
+        <div id="chips"></div>
+        <div class="grid2">
+          <div>
+            <label>Sentiment (−1..1)
+              <select id="colSentiment"></select>
+            </label>
+            <label>Subjectivity (0..1)
+              <select id="colSubjectivity"></select>
+            </label>
+            <label>Age Group (text)
+              <select id="colAge"></select>
+            </label>
+            <label>Province / Region
+              <select id="colProvince"></select>
+            </label>
+          </div>
+          <div>
+            <label>Discovery Channel (categorical)
+              <select id="colDiscovery"></select>
+            </label>
+            <label>Format Era / Transition (categorical)
+              <select id="colFormat"></select>
+            </label>
+            <label>AI Attitude (categorical)
+              <select id="colAI"></select>
+            </label>
+            <label>Rows to use (0 = all)
+              <input id="rowLimit" type="number" value="0" min="0" />
+            </label>
+          </div>
+        </div>
+
+        <div class="row">
+          <div>
+            <label>Base Key
+              <input id="baseKey" type="text" value="C" />
+            </label>
+          </div>
+          <div>
+            <label>Base Octave
+              <input id="baseOct" type="number" value="4" min="1" max="7" />
+            </label>
+          </div>
+        </div>
+
+        <div class="btns">
+          <button id="btnAnalyze" class="primary" disabled>Analyze</button>
+          <button id="btnPlay" disabled>Play</button>
+          <button id="btnStop" disabled>Stop</button>
+        </div>
+      </div>
+
+      <div class="footer">Tip: If a dropdown is empty, load your CSV first. Pick columns that best match each role. Defaults will be guessed.</div>
+    </section>
+
+    <aside class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <strong>Session</strong>
+        <span class="pill" id="tempoPill">Tempo: —</span>
+      </div>
+      <div class="log" id="log">Load a CSV to begin…</div>
+    </aside>
+  </main>
+
+<script>
+// ---------- utilities ----------
+const $ = (id)=>document.getElementById(id)
+const log = (msg)=>{ const el=$('log'); el.textContent += (el.textContent?"\n":"") + msg; el.scrollTop = el.scrollHeight }
+const setOptions = (sel, names)=>{ sel.innerHTML=''; const opt0=document.createElement('option'); opt0.value=''; opt0.textContent='— none —'; sel.appendChild(opt0); names.forEach(n=>{const o=document.createElement('option'); o.value=n;o.textContent=n; sel.appendChild(o)}) }
+
+function guessColumn(names, patterns){
+  const lower = names.map(n=>n.toLowerCase())
+  for(const p of patterns){
+    const i = lower.findIndex(n=> n.includes(p))
+    if(i>=0) return names[i]
+  }
+  return ''
+}
+
+function clamp(x,a,b){ return Math.max(a, Math.min(b, x)) }
+function lerp(a,b,t){ return a+(b-a)*t }
+
+// musical helpers
+const NOTE_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B']
+const MAJOR = [0,2,4,5,7,9,11]
+const MINOR = [0,2,3,5,7,8,10]
+
+function noteToFreq(note){ return Tone.Frequency(note).toFrequency() }
+function midiFromKeyDeg(baseKey='C', octave=4, deg=0, isMajor=true){
+  const baseIdx = NOTE_NAMES.indexOf(baseKey.toUpperCase())
+  const scale = isMajor? MAJOR: MINOR
+  const semis = scale[(deg%7+7)%7] + 12*Math.floor(deg/7)
+  const midiBase = (octave+1)*12 + baseIdx
+  return midiBase + semis
+}
+
+function hashToInt(str){ let h=0; for(let i=0;i<str.length;i++){ h = (h<<5)-h + str.charCodeAt(i); h|=0 } return Math.abs(h) }
+
+function catToDegree(cat){ return hashToInt(String(cat)) % 7 }
+function catToChord(cat){ const r = hashToInt(String(cat)) % 4; return [0,3,4,5][r] } // iii, IV, V, VI-ish
+
+// map province to pan position
+function panForProvince(p){
+  if(!p) return 0
+  const s = String(p).toLowerCase()
+  if(/bc|british/.test(s)) return -0.3
+  if(/ab|alberta|sk|sask/.test(s)) return -0.1
+  if(/on|ontario/.test(s)) return 0
+  if(/qc|qu[eé]bec/.test(s)) return 0.2
+  return 0.35 // atlantic & territories, give sparkle on right
+}
+
+// age → tempo
+function tempoForAge(a){
+  const s = String(a||'').toLowerCase()
+  if(/18|19|2\d|3[0-4]|youth|young/.test(s)) return 132
+  if(/35|4\d|5[0-4]/.test(s)) return 100
+  if(/55|6\d|7\d|senior|older/.test(s)) return 72
+  return 110
+}
+
+// AI attitude → modulation
+function modulationForAI(s){
+  if(!s) return 0
+  const t = String(s).toLowerCase()
+  if(/into|excited|support|curious/.test(t)) return +7 // up a fifth
+  if(/wrong|oppose|against|fear|concern/.test(t)) return -3 // to relative minor feel
+  if(/unsure|mixed|depends/.test(t)) return +2 // whole-step side-glance
+  return 0
+}
+
+// format → pad chord color
+function chordColorForFormat(s){
+  if(!s) return 0
+  const t = String(s).toLowerCase()
+  if(/vinyl|cassette|tape|analog/.test(t)) return 0 // warm i/IV
+  if(/cd|mp3|digital/.test(t)) return 3 // mediant color
+  if(/stream|playlist|cloud/.test(t)) return 4 // dominant open
+  return 5
+}
+
+let rows = []
+let columns = []
+let analysis = null
+let transportStarted = false
+
+$('file').addEventListener('change', (e)=>{
+  const file = e.target.files[0]
+  if(!file) return
+  Papa.parse(file, {
+    header: true,
+    dynamicTyping: true,
+    complete: (res)=>{
+      rows = res.data.filter(r=>Object.keys(r).length>0)
+      columns = res.meta.fields || Object.keys(rows[0]||{})
+      setOptions($('colSentiment'), columns)
+      setOptions($('colSubjectivity'), columns)
+      setOptions($('colAge'), columns)
+      setOptions($('colProvince'), columns)
+      setOptions($('colDiscovery'), columns)
+      setOptions($('colFormat'), columns)
+      setOptions($('colAI'), columns)
+
+      // guess sensible defaults
+      $('colSentiment').value = guessColumn(columns,["sentiment","polarity"])
+      $('colSubjectivity').value = guessColumn(columns,["subjectiv"]) 
+      $('colAge').value = guessColumn(columns,["age"]) 
+      $('colProvince').value = guessColumn(columns,["prov","region","state"]) 
+      $('colDiscovery').value = guessColumn(columns,["discover","channel","tiktok","radio","playlist"]) 
+      $('colFormat').value = guessColumn(columns,["format","vinyl","stream"]) 
+      $('colAI').value = guessColumn(columns,["ai","clone","synthetic"]) 
+
+      $('btnAnalyze').disabled = false
+      log(`Loaded ${rows.length} rows. Columns: ${columns.join(', ')}`)
+      const chips = $('chips'); chips.innerHTML = ''
+      columns.slice(0,18).forEach(c=>{ const s=document.createElement('span'); s.className='pill'; s.textContent=c; chips.appendChild(s) })
+    }
+  })
+})
+
+$('btnAnalyze').addEventListener('click',()=>{
+  if(!rows.length) return
+  const S = $('colSentiment').value
+  const U = $('colSubjectivity').value
+  const A = $('colAge').value
+  const P = $('colProvince').value
+  const D = $('colDiscovery').value
+  const F = $('colFormat').value
+  const AI = $('colAI').value
+
+  const selected = {S,U,A,P,D,F,AI}
+  log(`Mapping → sentiment:${S||'—'} subj:${U||'—'} age:${A||'—'} prov:${P||'—'} discovery:${D||'—'} format:${F||'—'} ai:${AI||'—'}`)
+
+  // global session characteristics
+  const ages = rows.map(r=>A? r[A]:null).filter(Boolean)
+  const ageMode = ages.sort((a,b)=> ages.filter(v=>v===a).length - ages.filter(v=>v===b).length).pop()
+  const tempo = tempoForAge(ageMode)
+  $('tempoPill').textContent = `Tempo: ${tempo} BPM`
+
+  const baseKey = $('baseKey').value || 'C'
+  const baseOct = parseInt($('baseOct').value||4)
+
+  analysis = {selected, tempo, baseKey, baseOct}
+  $('btnPlay').disabled = false
+  log(`Session set. Base key ${baseKey}${baseOct}. Approx age-mode '${ageMode ?? '—'}' → ${tempo} BPM.`)
+})
+
+// ---------- Tone graph ----------
+let synthMain, synthPad, synthBass, panMain, panPad, panBass
+
+function setupTone(){
+  // main voice
+  synthMain = new Tone.PolySynth(Tone.Synth, {
+    oscillator: { type: 'triangle' },
+    envelope: { attack: 0.01, decay: 0.2, sustain: 0.2, release: 0.6 }
+  })
+  panMain = new Tone.Panner(0)
+  synthMain.chain(panMain, new Tone.Reverb({decay:2, wet:0.2}), new Tone.Limiter(-3), Tone.Destination)
+
+  // pad
+  synthPad = new Tone.PolySynth(Tone.Synth, {
+    oscillator: { type: 'sine' },
+    envelope: { attack: 0.8, decay: 0.4, sustain: 0.7, release: 2.5 }
+  })
+  panPad = new Tone.Panner(0)
+  synthPad.chain(panPad, new Tone.Chorus(3, 2.5, 0.4), new Tone.Limiter(-6), Tone.Destination)
+
+  // bass
+  synthBass = new Tone.MonoSynth({
+    oscillator: { type: 'square' },
+    envelope: { attack: 0.02, decay: 0.2, sustain: 0.4, release: 0.3 },
+    filter: { Q: 1 }, filterEnvelope: { attack: 0.01, decay: 0.2, sustain: 0.2, release: 0.2, baseFrequency: 70, octaves: 2 }
+  })
+  panBass = new Tone.Panner(0)
+  synthBass.chain(panBass, new Tone.Compressor(-12, 3), Tone.Destination)
+}
+
+async function ensureAudio(){
+  if(!transportStarted){
+    await Tone.start();
+    transportStarted=true
+  }
+}
+
+$('btnPlay').addEventListener('click', async ()=>{
+  if(!analysis) return
+  await ensureAudio()
+  if(!synthMain) setupTone()
+
+  const {selected:{S,U,A,P,D,F,AI}, tempo, baseKey, baseOct} = analysis
+  Tone.Transport.bpm.value = tempo
+
+  // score parameters
+  const limit = parseInt($('rowLimit').value||0)
+  const selectedRows = limit>0 ? rows.slice(0,limit) : rows
+
+  // compute modulation for midpoint
+  const aiVals = selectedRows.map(r=> AI? String(r[AI]??''): '')
+  const mod = modulationForAI(aiVals.sort((a,b)=> aiVals.filter(v=>v===a).length - aiVals.filter(v=>v===b).length).pop())
+
+  // schedule
+  Tone.Transport.stop();
+  Tone.Transport.cancel();
+
+  const baseKeyIdx = NOTE_NAMES.indexOf((baseKey||'C').toUpperCase())
+  const keyOffset1 = baseKeyIdx
+  const keyOffset2 = (baseKeyIdx + mod + 12) % 12
+
+  const total = selectedRows.length
+  const step = 0.25 // quarter-note spacing
+  let t = "+0"
+
+  // pad bed cycles every 2 measures
+  const padPart = new Tone.Loop((time)=>{
+    const fmt = selectedRows[Math.floor(Math.random()*total)]
+    const color = chordColorForFormat(F? fmt[F]: '')
+    const deg = [0, color, 5][Math.floor(Math.random()*3)]
+    const midi = midiFromKeyDeg(NOTE_NAMES[keyOffset1], baseOct, deg, true)
+    const midi2 = midiFromKeyDeg(NOTE_NAMES[keyOffset1], baseOct+1, (deg+2)%7, true)
+    synthPad.triggerAttackRelease([Tone.Frequency(midi,'midi'), Tone.Frequency(midi2,'midi')], '2m', time, 0.35)
+    panPad.pan.rampTo(lerp(-0.2,0.2,Math.random()), 0.5)
+  }, '2m')
+  padPart.start(0)
+
+  selectedRows.forEach((r, i)=>{
+    const pol = S? parseFloat(r[S]) : 0
+    const subj = U? parseFloat(r[U]) : 0.5
+
+    const isMajorFirst = (pol||0) >= 0
+    const whichKeyOffset = (i/total < 0.5) ? keyOffset1 : keyOffset2
+
+    const deg = catToDegree(D? r[D] : i)
+    const midi = midiFromKeyDeg(NOTE_NAMES[whichKeyOffset], baseOct + (isMajorFirst?0:-1), deg, isMajorFirst)
+
+    const provPan = panForProvince(P? r[P] : '')
+
+    const vel = clamp(0.2 + 0.6*clamp(subj||0, 0, 1), 0.1, 0.95)
+
+    // main note
+    Tone.Transport.scheduleOnce((time)=>{
+      panMain.pan.rampTo(provPan, 0.05)
+      synthMain.triggerAttackRelease(Tone.Frequency(midi,'midi'), '8n', time, vel)
+    }, t)
+
+    // bass on downbeats
+    if(i%4===0){
+      const bassMidi = midiFromKeyDeg(NOTE_NAMES[whichKeyOffset], Math.max(1, baseOct-2), 0, isMajorFirst)
+      Tone.Transport.scheduleOnce((time)=>{
+        panBass.pan.rampTo(provPan*0.5, 0.05)
+        synthBass.triggerAttackRelease(Tone.Frequency(bassMidi,'midi'), '4n', time, 0.5)
+      }, t)
+    }
+
+    // advance time
+    const stepJitter = step + (Math.random()*0.05)
+    t = `+${(i+1)*stepJitter}`
+  })
+
+  $('btnStop').disabled = false
+  Tone.Transport.start('+0.1')
+  log(`Playing ${selectedRows.length} rows. Modulation: ${mod>=0?'+':''}${mod} semis at midpoint.`)
+})
+
+$('btnStop').addEventListener('click', ()=>{
+  Tone.Transport.stop();
+  Tone.Transport.cancel();
+  log('Stopped.')
+})
+</script>
+</body>
+</html>
